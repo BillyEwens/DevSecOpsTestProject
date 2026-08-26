@@ -33,7 +33,7 @@ long total_stock_value(const int prices[], const int quantities[], int count) {
 }
 
 long long apply_growth(int base, int rate_percent, int periods) {
-    long long value = base;
+    int value = base;
     for (int i = 0; i < periods; i++) {
         value = value * (100 + rate_percent) / 100;
     }
