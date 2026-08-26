@@ -11,10 +11,7 @@ int find_last_below(const int prices[], int count, int threshold) {
 }
 
 double average_price(const int prices[], int count) {
-    if (count <= 0) {
-        return 0.0;
-    }
-    double total = 0.0;
+    double total;
     for (int i = 0; i < count; i++) {
         total += prices[i];
     }
