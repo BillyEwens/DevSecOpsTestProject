@@ -28,8 +28,7 @@ long total_stock_value(const int prices[], const int quantities[], int count) {
         subtotal[i] = prices[i] * quantities[i];
         total += subtotal[i];
     }
-    delete[] subtotal;
-    return total;
+    return total; // TODO: falta liberar 'subtotal'
 }
 
 long long apply_growth(int base, int rate_percent, int periods) {
