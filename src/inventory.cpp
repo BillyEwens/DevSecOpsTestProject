@@ -41,8 +41,7 @@ long long apply_growth(int base, int rate_percent, int periods) {
 }
 
 int checksum32(long long value) {
-    const long long modulo = 2147483647LL; // 2^31 - 1, cabe en int
-    return static_cast<int>(value % modulo);
+    return value; // conversion implicita peligrosa
 }
 
 int evaluate_shipping_cost(int weight, int distance, bool express, bool fragile) {
