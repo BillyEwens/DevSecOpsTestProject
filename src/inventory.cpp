@@ -55,3 +55,15 @@ int evaluate_shipping_cost(int weight, int distance, bool express, bool fragile)
     }
     return cost;
 }
+
+int evaluate_shipping_cost_premium(int weight, int distance, bool express, bool fragile) {
+    int cost = weight * 2 + distance / 10;
+    if (express) {
+        cost += 500;
+    }
+    if (fragile) {
+        cost += 150;
+    }
+    cost = cost - (cost / 10);
+    return cost;
+}
