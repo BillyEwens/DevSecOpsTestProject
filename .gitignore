@@ -1,0 +1,9 @@
+build/
+build-*/
+*.o
+*.gcda
+*.gcno
+coverage-report*.html
+coverage.xml
+compile_commands.json
+.cache/

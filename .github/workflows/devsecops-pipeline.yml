@@ -1,0 +1,209 @@
+name: DevSecOps Pipeline - Laboratorio C++
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+env:
+  # Umbral mínimo de cobertura de línea exigido para no bloquear el PR.
+  COVERAGE_THRESHOLD: 70
+
+jobs:
+
+  # ---------------------------------------------------------------------
+  # 0) Secret scanning - se ejecuta primero (fail fast, es barato).
+  # ---------------------------------------------------------------------
+  secret-scanning:
+    name: "0. Secret Scanning (Gitleaks)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------
+  # 1) Compilación con GCC y con Clang (matriz), advertencias visibles
+  #    pero sin bloquear todavía: confirma que el código compila.
+  # ---------------------------------------------------------------------
+  build:
+    name: "1. Build (${{ matrix.compiler }})"
+    runs-on: ubuntu-latest
+    needs: secret-scanning
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar dependencias
+        run: sudo apt-get update && sudo apt-get install -y cmake clang
+      - name: Configurar CMake
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            export CC=clang CXX=clang++
+          fi
+          cmake -S . -B build
+      - name: Compilar
+        run: cmake --build build
+
+  # ---------------------------------------------------------------------
+  # 2) Trabajo de calidad: advertencias tratadas como ERROR.
+  #    Este job BLOQUEA el PR ante cualquier warning del compilador
+  #    (incluye -Wuninitialized, -Wconversion, -Wshadow, etc.)
+  # ---------------------------------------------------------------------
+  quality-warnings-as-errors:
+    name: "2. Calidad: Warnings-as-Errors"
+    runs-on: ubuntu-latest
+    needs: secret-scanning
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Configurar con WARNINGS_AS_ERRORS=ON
+        run: cmake -S . -B build -DWARNINGS_AS_ERRORS=ON
+      - name: Compilar (falla ante cualquier advertencia)
+        run: cmake --build build
+
+  # ---------------------------------------------------------------------
+  # 3) Análisis estático: cppcheck (bugs/estilo) + jscpd (duplicación).
+  #    BLOQUEA ante hallazgos de severidad error o duplicación > 0%.
+  # ---------------------------------------------------------------------
+  static-analysis:
+    name: "3. Analisis estatico (cppcheck + jscpd)"
+    runs-on: ubuntu-latest
+    needs: secret-scanning
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Ejecutar cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                    --error-exitcode=1 --inline-suppr src/
+      - name: Ejecutar jscpd (detector de duplicacion)
+        run: npx --yes jscpd@latest src/ --min-lines 5 --min-tokens 30 --threshold 0
+
+  # ---------------------------------------------------------------------
+  # 4) Pruebas unitarias (build normal, sin sanitizers).
+  # ---------------------------------------------------------------------
+  unit-tests:
+    name: "4. Pruebas unitarias"
+    runs-on: ubuntu-latest
+    needs: [build, quality-warnings-as-errors, static-analysis]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Configurar y compilar
+        run: |
+          cmake -S . -B build
+          cmake --build build
+      - name: Ejecutar pruebas (CTest)
+        run: ctest --test-dir build --output-on-failure
+
+  # ---------------------------------------------------------------------
+  # 5) Ejecución instrumentada con sanitizers.
+  #    BLOQUEA ante cualquier hallazgo de ASan / UBSan / LeakSanitizer.
+  # ---------------------------------------------------------------------
+  sanitizers:
+    name: "5. Sanitizers (ASan + UBSan + LeakSanitizer)"
+    runs-on: ubuntu-latest
+    needs: [build, quality-warnings-as-errors, static-analysis]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Configurar con ENABLE_SANITIZERS=ON
+        run: cmake -S . -B build-san -DENABLE_SANITIZERS=ON
+      - name: Compilar
+        run: cmake --build build-san
+      - name: Ejecutar pruebas bajo sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build-san --output-on-failure
+
+  # ---------------------------------------------------------------------
+  # 6) Medición de cobertura, con umbral mínimo obligatorio.
+  # ---------------------------------------------------------------------
+  coverage:
+    name: "6. Cobertura de pruebas"
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar dependencias
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake
+          pip install gcovr --break-system-packages
+      - name: Configurar con ENABLE_COVERAGE=ON
+        run: cmake -S . -B build-cov -DENABLE_COVERAGE=ON
+      - name: Compilar
+        run: cmake --build build-cov
+      - name: Ejecutar pruebas (genera datos .gcda)
+        run: ctest --test-dir build-cov --output-on-failure
+      - name: Generar reporte de cobertura
+        run: |
+          gcovr --root . --object-directory build-cov \
+                --filter 'src/' \
+                --html-details coverage-report.html \
+                --xml coverage.xml \
+                --fail-under-line ${{ env.COVERAGE_THRESHOLD }} \
+                -s
+      - name: Publicar reporte de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage-report*.html
+            coverage.xml
+
+  # ---------------------------------------------------------------------
+  # 7) Publicación de reportes de analisis estatico como artefactos.
+  # ---------------------------------------------------------------------
+  publish-reports:
+    name: "7. Publicar reportes"
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Generar reporte XML de cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                    --xml --xml-version=2 src/ 2> cppcheck-report.xml
+      - name: Publicar reporte cppcheck
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck-report
+          path: cppcheck-report.xml
+
+  # ---------------------------------------------------------------------
+  # 8) Puerta de integración: bloqueo lógico. Este es el único check
+  #    obligatorio a configurar en "Branch protection rules" de GitHub;
+  #    agrega TODAS las verificaciones obligatorias como dependencias.
+  #    Si cualquiera falla, este job no corre y el merge queda bloqueado.
+  # ---------------------------------------------------------------------
+  integration-gate:
+    name: "8. Puerta de integracion (obligatoria)"
+    runs-on: ubuntu-latest
+    needs:
+      - secret-scanning
+      - build
+      - quality-warnings-as-errors
+      - static-analysis
+      - unit-tests
+      - sanitizers
+      - coverage
+    steps:
+      - name: Todas las verificaciones obligatorias pasaron
+        run: echo "El cambio cumple todos los criterios de calidad y seguridad. Listo para integrar."
