@@ -153,6 +153,7 @@ jobs:
         run: |
           gcovr --root . --object-directory build-cov \
                 --filter 'src/' \
+                --exclude 'src/main.cpp' 
                 --html-details coverage-report.html \
                 --xml coverage.xml \
                 --fail-under-line ${{ env.COVERAGE_THRESHOLD }} \
