@@ -149,7 +149,8 @@ jobs:
         run: cmake --build build-cov
       - name: Ejecutar pruebas (genera datos .gcda)
         run: ctest --test-dir build-cov --output-on-failure
-      - name: Generar reporte de cobertura run: gcovr --root . --object-directory build-cov --filter 'src/' --exclude 'src/main.cpp' --html-details coverage-report.html --xml coverage.xml --fail-under-line ${{ env.COVERAGE_THRESHOLD }} -s
+      - name: Generar reporte de cobertura 
+        run: gcovr --root . --object-directory build-cov --filter 'src/' --exclude 'src/main.cpp' --html-details coverage-report.html --xml coverage.xml --fail-under-line ${{ env.COVERAGE_THRESHOLD }} -s
       - name: Publicar reporte de cobertura
         if: always()
         uses: actions/upload-artifact@v4
