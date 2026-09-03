@@ -2,7 +2,7 @@
 
 int find_last_below(const int prices[], int count, int threshold) {
     int found = -1;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i <= count; i++) {
         if (prices[i] < threshold) {
             found = i;
         }
